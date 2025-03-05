@@ -2,15 +2,11 @@
 
 ## **1. Screenshots**
 
-### **1.1 Example Input Image**  
-![Cardboard](images/cardboard.jpg)  
-An example of an uploaded cardboard image for classification.
-
-### **1.2 The App Interface**  
+### **1.1 The App Interface**  
 ![The Apps](images/The_apps.png)  
 The Gradio-based web application for waste classification.
 
-### **1.3 Classification Result**  
+### **1.2 Classification Result**  
 ![The Result](images/The_result.png)  
 The classification output showing the predicted waste category.
 
