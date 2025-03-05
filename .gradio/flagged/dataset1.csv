@@ -1,0 +1,2 @@
+image,output,timestamp
+.gradio/flagged/image/62b4addb442dea31533e/cardboard_0.jpg,"{""label"": ""cardboard"", ""confidences"": [{""label"": ""cardboard"", ""confidence"": 0.7512609958648682}, {""label"": ""paper"", ""confidence"": 0.21328005194664001}, {""label"": ""trash"", ""confidence"": 0.016965588554739952}, {""label"": ""plastic"", ""confidence"": 0.01093758549541235}, {""label"": ""metal"", ""confidence"": 0.006031021010130644}, {""label"": ""glass"", ""confidence"": 0.0015247673727571964}]}",2025-03-05 18:21:27.362804

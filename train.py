@@ -1,95 +1,144 @@
-"""
-Workflow:
------------
-This script trains a fine-tuned ResNet18 model on a custom image classification dataset.
-It performs the following steps:
-
-1. Setup and Initialization:
-   - Imports necessary libraries including PyTorch, torchvision, logging, and tqdm for progress visualization.
-   - Configures logging to output information messages.
-   - Determines the computation device: uses Apple’s MPS if available, otherwise defaults to CPU.
-
-2. Model Preparation:
-   - Loads a pre-trained ResNet18 model using the latest weights.
-   - Modifies the final fully connected layer to output predictions corresponding to the number of classes in the dataset.
-   - Moves the model to the selected device.
-
-3. Training Loop:
-   - Iterates over the training DataLoader which is assumed to return properly batched images ([B, 3, 224, 224]) and labels ([B]).
-   - Performs a forward pass through the model.
-   - Computes the loss using CrossEntropyLoss.
-   - Backpropagates the loss and updates the model parameters using the Adam optimizer.
-   - Tracks running loss and accuracy.
-   - Saves the model every 20 batches (overwriting the previous saved model).
-
-4. Epoch Logging and Final Save:
-   - Logs the average loss and accuracy for each epoch.
-   - Saves the final trained model to "trashnet_resnet18.pth".
-   
-Usage:
-   - Ensure that the data_loader module correctly provides train_loader, val_loader, and class_names.
-   - If the DataLoader does not stack the samples correctly, consider using a custom collate function as shown above.
-   - Adjust hyperparameters such as epochs, learning rate, and save frequency as needed.
-"""
-
+# train.py
+import os
+import random
+import logging
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torchvision import transforms, datasets
 from torchvision.models import resnet18, ResNet18_Weights
-from data_loader import train_loader, val_loader, class_names
-import logging
-from tqdm import tqdm
+from torch.utils.data import DataLoader, Subset
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+##############################
+#         LOGGING
+##############################
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 logger = logging.getLogger(__name__)
 
-# Enable MPS (for Apple GPU) or fallback to CPU
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-logger.info(f"Using device: {device}")
+##############################
+#        SETTINGS
+##############################
+DATA_DIR     = "data"  # Folder "data" dari download_trashnet.py
+TRAIN_SUBSET = 200     # Ambil 200 imej untuk training (supaya cepat)
+VAL_SUBSET   = 50      # Ambil 50 imej untuk validation
+EPOCHS       = 2       # Latih 2 epoch
 
-# Load pre-trained ResNet18 using the new weights parameter
-weights = ResNet18_Weights.DEFAULT
-model = resnet18(weights=weights)
-num_features = model.fc.in_features
-model.fc = nn.Linear(num_features, len(class_names))
-model = model.to(device)
+def main():
+    logger.info("Mula proses training ResNet18 ...")
 
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    # 1) Setup data folder
+    train_dir = os.path.join(DATA_DIR, "train")
+    val_dir   = os.path.join(DATA_DIR, "val")
 
-epochs = 5
-save_every = 20  # Save model every 20 batches
+    # 2) Transforms
+    logger.info("Sediakan transforms & load dataset penuh ...")
+    common_transforms = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406],
+                             [0.229, 0.224, 0.225])
+    ])
 
-for epoch in range(epochs):
-    model.train()
-    running_loss = 0.0
-    correct = 0
-    total = 0
+    full_train_dataset = datasets.ImageFolder(train_dir, transform=common_transforms)
+    full_val_dataset   = datasets.ImageFolder(val_dir,   transform=common_transforms)
 
-    for batch_idx, (images, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch")):
-        # DataLoader should return images in shape [B, 3, 224, 224] and labels in shape [B]
-        images, labels = images.to(device), labels.to(device)
+    logger.info(f"Train folder total: {len(full_train_dataset)} imej.")
+    logger.info(f"Val folder total:   {len(full_val_dataset)} imej.")
 
-        optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+    # 3) Subset agar cepat
+    random.seed(42)
+    train_indices = list(range(len(full_train_dataset)))
+    random.shuffle(train_indices)
+    train_indices = train_indices[:TRAIN_SUBSET]
 
-        running_loss += loss.item() * images.size(0)
-        _, preds = torch.max(outputs, 1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
+    val_indices = list(range(len(full_val_dataset)))
+    random.shuffle(val_indices)
+    val_indices = val_indices[:VAL_SUBSET]
 
-        if (batch_idx + 1) % save_every == 0:
-            torch.save(model.state_dict(), "trashnet_resnet18.pth")
-            logger.info(f"Model saved after batch {batch_idx+1} ✅")
+    train_dataset = Subset(full_train_dataset, train_indices)
+    val_dataset   = Subset(full_val_dataset,   val_indices)
 
-    epoch_loss = running_loss / total if total > 0 else 0.0
-    epoch_acc = correct / total if total > 0 else 0.0
-    logger.info(f"Epoch {epoch+1}/{epochs}: Loss = {epoch_loss:.4f}, Accuracy = {epoch_acc:.4f}")
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    val_loader   = DataLoader(val_dataset,   batch_size=32, shuffle=False)
 
-torch.save(model.state_dict(), "trashnet_resnet18.pth")
-logger.info("Final model saved as trashnet_resnet18.pth ✅")
+    class_names = full_train_dataset.classes
+    logger.info(f"Kelas: {class_names}")
+
+    # 4) Device
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    logger.info(f"Guna device: {device}")
+
+    # 5) Model
+    logger.info("Muat ResNet18 pra-latih & ubah suai output layer ...")
+    weights = ResNet18_Weights.DEFAULT
+    model = resnet18(weights=weights)
+    num_features = model.fc.in_features
+    model.fc = nn.Linear(num_features, len(class_names))
+    model.to(device)
+
+    # 6) Loss & optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+
+    # 7) Training loop
+    logger.info(f"Bermula training untuk {EPOCHS} epoch ...")
+    for epoch in range(EPOCHS):
+        logger.info(f"---- EPOCH {epoch+1} ----")
+        model.train()
+        running_loss = 0.0
+        correct = 0
+        total = 0
+
+        for batch_idx, (images, labels) in enumerate(train_loader):
+            images, labels = images.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item() * images.size(0)
+            _, preds = torch.max(outputs, 1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+
+            if (batch_idx + 1) % 2 == 0:
+                logger.debug(f"Batch {batch_idx+1} - Loss: {loss.item():.4f}")
+
+        epoch_loss = running_loss / total if total else 0.0
+        epoch_acc  = correct / total if total else 0.0
+
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        val_correct = 0
+        val_total = 0
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+
+                val_loss += loss.item() * images.size(0)
+                _, preds = torch.max(outputs, 1)
+                val_correct += (preds == labels).sum().item()
+                val_total += labels.size(0)
+
+        val_loss /= val_total if val_total else 1
+        val_acc = val_correct / val_total if val_total else 0.0
+
+        logger.info(f"[Epoch {epoch+1}/{EPOCHS}] "
+                    f"Train Loss: {epoch_loss:.4f}, Train Acc: {epoch_acc:.4f} | "
+                    f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+
+    # 8) Simpan model
+    torch.save(model.state_dict(), "model.pth")
+    logger.info(">>> Model disimpan sebagai 'model.pth' ✅")
+
+if __name__ == "__main__":
+    main()
